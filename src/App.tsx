@@ -1,23 +1,46 @@
 import React from 'react';
 import logo from './logo.svg';
 import './App.css';
+// @ts-ignore
+const rust = import('rust-wasm');
+
+// function pdx2json(text: string): object {
+//   rust.then(created => created.greet(text)).catch(console.error)
+//   return text as unknown as object
+// }
 
 function App() {
+  function onChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.item(0)
+    if (file) {
+      const reader = new FileReader()
+      reader.onload = (readEvent) => {
+        console.log("Finished reading")
+        const result = reader.result as string // has to be, because we read as text
+        if (result) {
+          // pdx2json(result)
+        }
+      }
+      reader.onprogress = (progressEvent) => {
+        console.log("Loaded " + progressEvent.loaded + " out of " + progressEvent.total)
+      }
+      reader.onerror = (progressEvent) => {
+        console.log("Error loading!")
+      }
+      reader.readAsText(file)
+    }
+  }
+
   return (
     <div className="App">
       <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
         <p>
-          Edit <code>src/App.tsx</code> and save to reload.
+          Victoria econ viewer.
         </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
+        <input id="myInput"
+          type="file"
+          onChange={onChange}
+        />
       </header>
     </div>
   );
