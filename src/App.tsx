@@ -13,7 +13,7 @@ function getMethodsNames(obj: any) {
 function pdx2json(text: string): object {
   rust.then(created => {
     console.log(getMethodsNames(created))
-    created.greet()
+    created.process_save(text)
   }).catch(console.error)
   return text as unknown as object
 }
