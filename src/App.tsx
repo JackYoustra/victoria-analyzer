@@ -2,12 +2,21 @@ import React from 'react';
 import logo from './logo.svg';
 import './App.css';
 // @ts-ignore
-const rust = import('rust-wasm');
+const rust = import('victoria-processing');
 
-// function pdx2json(text: string): object {
-//   rust.then(created => created.greet(text)).catch(console.error)
-//   return text as unknown as object
-// }
+// Get the Object's methods names:
+function getMethodsNames(obj: any) {
+  return Object.keys(obj)
+      .filter((key) => typeof obj[key] === 'function');
+}
+
+function pdx2json(text: string): object {
+  rust.then(created => {
+    console.log(getMethodsNames(created))
+    created.greet()
+  }).catch(console.error)
+  return text as unknown as object
+}
 
 function App() {
   function onChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -18,7 +27,7 @@ function App() {
         console.log("Finished reading")
         const result = reader.result as string // has to be, because we read as text
         if (result) {
-          // pdx2json(result)
+          pdx2json(result)
         }
       }
       reader.onprogress = (progressEvent) => {

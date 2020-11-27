@@ -14,8 +14,8 @@
     "react": "^17.0.1",
     "react-dom": "^17.0.1",
     "react-scripts": "4.0.0",
-    "rust-wasm": "file:../../.nvm/versions/node/v15.2.1/lib/node_modules/rust-wasm",
     "typescript": "^4.1.2",
+    "victoria-processing": "file:victoria-processing/pkg",
     "web-vitals": "^0.2.4"
   },
   "scripts": {

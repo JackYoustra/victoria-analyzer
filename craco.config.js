@@ -29,7 +29,7 @@ module.exports = {
           //    - this is the package.json dependency location
           webpackConfig.plugins.push(
             new WasmPackPlugin({
-              crateDirectory: path.resolve(__dirname, "_old-rust-wasm"),
+              crateDirectory: path.resolve(__dirname, "victoria-processing"),
             })
           );
           return webpackConfig;
