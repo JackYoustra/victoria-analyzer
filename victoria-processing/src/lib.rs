@@ -45,7 +45,8 @@ pub enum Node<'a> {
 peg::parser! {
     pub grammar save_parser() for str {
         rule _() = [' ' | '\n' | '\r' | '\t']*
-        rule atomic() = quiet!{['a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' | '"' ]+}
+        rule atomic()
+         = quiet!{ (![' ' | '\n' | '\r' | '\t' | '=' | '}' | '{'] [_])+ }
             / expected!("atom")
 
         rule id() ->  &'input str
@@ -68,11 +69,12 @@ peg::parser! {
          / identifier:id() _ "{" _ e:entry()* "}" _ { Node::Line((identifier, e)) }
          // parse named lists
          / identifier:id() _ "{" _ e:list() "}" _ { Node::Line((identifier, e)) }
-         // parse anon lysts
+         // parse anon lists
          / _ "{" _ e:list() _ "}" _ { Node::List(e) }
 
        pub rule save() -> Vec<Node<'input>>
-        = e:entry()* { e }
+       // dumb trailing curly brace
+        = e:entry()* "}"? _ { e }
     }
 }
 

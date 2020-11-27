@@ -34,7 +34,7 @@ fn manual_test() {
     {
 
         {
-            province_pop_id=
+            próvince_pop_id=
             {
             province_id=1
             index=0
@@ -46,7 +46,7 @@ fn manual_test() {
     let employees_expression =
         Node::Line(("employees", vec![
             Node::List(vec![
-                Node::Line(("province_pop_id", vec![
+                Node::Line(("próvince_pop_id", vec![
                     Node::Line(("province_id", vec![Node::Leaf("1")])),
                     Node::Line(("index", vec![Node::Leaf("0")])),
                     Node::Line(("type", vec![Node::Leaf("9")])),
@@ -57,6 +57,8 @@ fn manual_test() {
     assert_eq!(save_parser::entry(date_string), Ok(date_expression.clone()));
     assert_eq!(save_parser::entry(unit_string), Ok(unit_expression.clone()));
     assert_eq!(save_parser::save(unit_string), Ok(vec![unit_expression.clone()]));
+    assert_eq!(save_parser::entry(employees_string), Ok(employees_expression.clone()));
+    assert_eq!(save_parser::save(employees_string), Ok(vec![employees_expression.clone()]));
     let combined_expression = vec![
         date_expression,
         unit_expression,
