@@ -1,24 +1,31 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import logo from './logo.svg';
 import './App.css';
+import CircularIntegration, { ProcessTypes } from "./Components/Progress";
+import { createStyles, makeStyles, Theme } from "@material-ui/core/styles";
+import { green } from "@material-ui/core/colors";
 // @ts-ignore
 const rust = import('victoria-processing');
 
 // Get the Object's methods names:
 function getMethodsNames(obj: any) {
   return Object.keys(obj)
-      .filter((key) => typeof obj[key] === 'function');
+    .filter((key) => typeof obj[key] === 'function');
 }
 
-function pdx2json(text: string): object {
-  rust.then(created => {
-    console.log(getMethodsNames(created))
-    created.process_save(text)
-  }).catch(console.error)
-  return text as unknown as object
-}
+const useStyles = makeStyles((theme: Theme) =>
+  createStyles({
+    input: {
+      display: 'none',
+    },
+  }),
+);
 
 function App() {
+  const [processState, setProcessState] = React.useState(ProcessTypes.initial);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const classes = useStyles();
+
   function onChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.item(0)
     if (file) {
@@ -27,7 +34,15 @@ function App() {
         console.log("Finished reading")
         const result = reader.result as string // has to be, because we read as text
         if (result) {
-          pdx2json(result)
+          rust.then(created => {
+            created.process_save(result)
+            setProcessState(ProcessTypes.success)
+          }).catch(error => {
+            console.error(error)
+            setProcessState(ProcessTypes.failed)
+          })
+        } else {
+          setProcessState(ProcessTypes.failed)
         }
       }
       reader.onprogress = (progressEvent) => {
@@ -37,7 +52,13 @@ function App() {
         console.log("Error loading!")
       }
       reader.readAsText(file)
+    } else {
+      setProcessState(ProcessTypes.cancelled)
     }
+  }
+
+  function handleClick() {
+    inputRef.current?.click()
   }
 
   return (
@@ -47,8 +68,14 @@ function App() {
           Victoria econ viewer.
         </p>
         <input id="myInput"
-          type="file"
-          onChange={onChange}
+               type="file"
+               ref={inputRef}
+               className={classes.input}
+               onChange={onChange}
+        />
+        <CircularIntegration
+          processState={processState}
+          onClick={handleClick}
         />
       </header>
     </div>
