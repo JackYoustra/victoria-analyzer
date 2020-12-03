@@ -4,17 +4,14 @@
 
 extern crate wasm_bindgen_test;
 use wasm_bindgen_test::*;
-use victoria_processing::{process_save, save_parser, Node};
+use victoria_processing::{unquote, save_parser, Node, parse_victoria_date};
+use chrono::NaiveDate;
 
 #[macro_use]
 extern crate matches;
 
 // wasm_bindgen_test_configure!(run_in_browser);
 
-#[wasm_bindgen_test]
-fn pass() {
-    assert_eq!(1 + 1, 2);
-}
 
 #[wasm_bindgen_test]
 fn manual_test() {
