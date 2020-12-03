@@ -11,6 +11,9 @@ use std::error;
 use web_sys::console;
 use crate::ParseError::MissingNode;
 
+use lazy_static::lazy_static; // 1.3.0
+use regex::Regex;
+
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
 #[cfg(feature = "wee_alloc")]
@@ -22,6 +25,11 @@ macro_rules! log {
     ( $( $t:tt )* ) => {
         web_sys::console::log_1(&format!( $( $t )* ).into());
     }
+}
+
+// Regexes
+lazy_static! {
+    static ref COUNTRY_TAG: Regex = Regex::new(r"^[A-Z]{3}$").unwrap();
 }
 
 #[wasm_bindgen]
@@ -37,30 +45,68 @@ struct Product<'a> {
     // assert discovered good true
 }
 
-struct WorldMarket {
-
-}
-
+#[derive(Debug, Eq, PartialEq, Clone)]
 struct Building<'a> {
     name: &'a str,
-    money: f64,
+    //money: f64,
 }
 
+#[derive(Debug, Eq, PartialEq, Clone)]
 struct State<'a> {
     buildings: &'a [Building<'a>],
 }
 
-struct Country<'a> {
-    states: &'a [State<'a>],
+impl<'a> State<'a> {
+    fn new(list: &'a Node<'a>) -> Result<State, ParseError> {
+        Err(MissingNode)
+    }
 }
 
-struct Save<'a> {
+#[derive(Debug, Eq, PartialEq)]
+struct Country<'a> {
+    states: Vec<State<'a>>,
+}
+
+impl<'a> Country<'a> {
+    fn new(list: Node<'a>) -> Result<Country, ParseError> {
+        if let Node::List(props) = list {
+            let mut states = None::<Vec<State>>;
+            let error = props.iter().filter_map(|x| -> Option<ParseError> {
+                match x {
+                    Node::Line(("state", vec)) if states == None => {
+                        let results: Result<Vec<State>, _> = vec.iter().map(State::new).collect();
+                        match results {
+                            Ok(stateResults) => {
+                                states = Some(stateResults);
+                                None
+                            },
+                            Err(bad) => Some(bad)
+                        }
+                    },
+
+                    _ => None,
+                }
+            }).next();
+            return match error {
+                Some(err) => Err(err.clone()),
+                None => Ok(Country {
+                    // states: states.unwrap(),
+                    states: vec![],
+                })
+            }
+        }
+        Err(MissingNode)
+    }
+}
+
+#[derive(Debug)]
+pub struct Save<'a> {
     date: NaiveDate,
     player_tag: &'a str,
     // flags: Vec<&'a str>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ParseError {
     InvalidDate,
     Integer(ParseIntError),
@@ -137,16 +183,11 @@ pub fn parse_victoria_date(text: &str) -> Result<NaiveDate, ParseError> {
 }
 
 impl<'a> Save<'a> {
-    // let mut stuff = None;
-    fn new(list: Node<'a>) -> Result<Save, ParseError> {
+    pub fn new(list: Node<'a>) -> Result<Save, ParseError> {
         if let Node::List(thing) = list {
             let mut date = None::<NaiveDate>;
             let mut player_tag = None::<&'a str>;
             let error = thing.iter().filter_map( |x| -> Option<ParseError> {
-                // Don't parse anything else if all done
-                if date != None && player_tag != None {
-                    return None
-                }
                 match x {
                     Node::Line(("date", vec)) if date == None => {
                         match vec.as_slice() {
@@ -173,6 +214,14 @@ impl<'a> Save<'a> {
                             _ => None
                         }
                     },
+                    // All countries are three-letter words
+                    Node::Line((rootkey, vec)) => {
+                        if COUNTRY_TAG.is_match(rootkey) {
+
+                        }
+                        None
+                    },
+
                     _ => None,
                 }
             }).next();
@@ -232,8 +281,11 @@ peg::parser! {
     }
 }
 
-pub fn greet() {
-    alert("Hello, victoria-processing!");
+pub fn parse_save(savetext: &str) -> Result<Node, peg::error::ParseError<peg::str::LineCol>> {
+    match save_parser::save(savetext) {
+        Ok(e) => Ok(Node::List(e)),
+        Err(e) => Err(e),
+    }
 }
 
 #[wasm_bindgen]
