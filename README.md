@@ -50,3 +50,6 @@ To learn React, check out the [React documentation](https://reactjs.org/).
 * Wikipedia page for battles
 * Wikipedia-like diagram for imports and exorts
 * Zoomable sunburst, or something like it, for production
+* Per-country wikipedia page?
+* Money breakdown - total money stock of the world, who owns what, etc
+* Current / potential RGO production breakdown
