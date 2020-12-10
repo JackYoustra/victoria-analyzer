@@ -1,5 +1,6 @@
 use wasm_bindgen_test::*;
-use victoria_processing::{Save, parse_save};
+use victoria_processing::{Save, Node, parse_save};
+use wasm_bindgen::JsValue;
 
 #[macro_use]
 extern crate matches;
@@ -8,7 +9,8 @@ extern crate matches;
 fn file_test() {
     let ukgame = include_str!("UK Warround 2.v2");
     let save_value = parse_save(ukgame);
-    assert_matches!(save_value, Ok(_));
-    let save_result = Save::new(save_value.unwrap());
+    assert_matches!(save_value, Ok(Node::List(_)));
+    let save_value = save_value.unwrap();
+    let save_result = Save::new(save_value.clone());
     assert_matches!(save_result, Ok(_));
 }

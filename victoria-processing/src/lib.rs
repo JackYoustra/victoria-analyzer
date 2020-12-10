@@ -3,12 +3,11 @@ mod utils;
 use wasm_bindgen::prelude::*;
 use peg;
 use chrono::NaiveDate;
-use std::collections::BTreeMap;
 use std::num::ParseIntError;
 use core::fmt;
 use std::error;
 
-use web_sys::console;
+use serde_json;
 use crate::ParseError::MissingNode;
 
 use lazy_static::lazy_static; // 1.3.0
@@ -20,12 +19,6 @@ use regex::Regex;
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-// A macro to provide `println!(..)`-style syntax for `console.log` logging.
-macro_rules! log {
-    ( $( $t:tt )* ) => {
-        web_sys::console::log_1(&format!( $( $t )* ).into());
-    }
-}
 
 // Regexes
 lazy_static! {
@@ -184,6 +177,7 @@ pub fn parse_victoria_date(text: &str) -> Result<NaiveDate, ParseError> {
 
 impl<'a> Save<'a> {
     pub fn new(list: Node<'a>) -> Result<Save, ParseError> {
+        return Err(MissingNode);
         if let Node::List(thing) = list {
             let mut date = None::<NaiveDate>;
             let mut player_tag = None::<&'a str>;
@@ -241,8 +235,82 @@ impl<'a> Save<'a> {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Node<'a> {
     Line((&'a str, Vec<Node<'a >>)),
+    SingleElementLine((&'a str, &'a str)),
     List(Vec<Node<'a >>),
     Leaf(&'a str),
+}
+
+impl<'a> Node<'a> {
+    fn insert_or_listify(name: &'a str, object: &serde_json::Value, map: &mut serde_json::Map<String, serde_json::Value>, seen: &mut Vec<&'a str>) {
+        if let Some(prior) = map.get(name) {
+            // if we already have an entry in the map for this element,
+            // convert it to a list of this element with the name as a key
+            // for now, means we can't invert unless we make this nicer
+            if seen.contains(&name) {
+                // append to list
+                if let Some(serde_json::Value::Array(elements)) = map.get_mut(name) {
+                    elements.push(object.clone());
+                } else {
+                    unreachable!()
+                }
+            } else {
+                // create list
+                seen.push(name);
+                map.insert(name.to_string(), serde_json::Value::Array(vec![prior.clone(), object.clone()]));
+            }
+        } else {
+            map.insert(name.to_string(), object.clone());
+        }
+    }
+
+    // convert a function to serde's json
+    pub fn to_json(&self) -> serde_json::Value {
+        match self {
+            Node::Line((_, arr)) | Node::List(arr) => {
+                // Object if any element has a child
+                // List if none do
+                // Undefined if both
+                if let Some(thing) = arr.first() {
+                    match thing {
+                        // List
+                        Node::Leaf(_) => serde_json::Value::Array(arr.iter().map(|x| x.to_json()).collect()),
+                        // Object
+                        _ => {
+                            let mut map = serde_json::Map::new();
+                            let mut stuff = vec![];
+                            for element in arr.iter() {
+                                match element {
+                                    Node::Line((name, innerLineItems)) => {
+                                        Node::insert_or_listify(name, &Node::List(innerLineItems.clone()).to_json(), &mut map, &mut stuff);
+                                    }
+                                    l @ Node::List(_) => {
+                                        Node::insert_or_listify("list", &l.to_json(), &mut map, &mut stuff);
+                                    }
+                                    Node::SingleElementLine((name, object)) => {
+                                        Node::insert_or_listify(name, &Node::Leaf(object).to_json(), &mut map, &mut stuff);
+                                    }
+                                    Node::Leaf(name) => {
+                                        unreachable!();
+                                        Node::insert_or_listify(name, &serde_json::Value::Null, &mut map, &mut stuff);
+                                    }
+                                }
+                            }
+                            serde_json::Value::Object(map)
+                        }
+                    }
+                } else {
+                    // just return empty
+                    serde_json::Value::Array(vec![])
+                }
+            }
+            Node::Leaf(str) | Node::SingleElementLine((_, str)) => {
+                match str.parse::<serde_json::Number>() {
+                    Ok(val) => serde_json::Value::Number(val),
+                    _ => serde_json::Value::String(str.to_string())
+                }
+            }
+        }
+    }
 }
 
 peg::parser! {
@@ -263,7 +331,7 @@ peg::parser! {
         = a:list_element()* { a }
 
         rule line() -> Node<'input>
-         = identifier:id() leafsymbol:$(atomic()) _ { Node::Line((identifier, vec![Node::Leaf(leafsymbol)])) }
+         = identifier:id() leafsymbol:$(atomic()) _ { Node::SingleElementLine((identifier, leafsymbol)) }
 
         pub rule entry() -> Node<'input>
         // parse normal lines
