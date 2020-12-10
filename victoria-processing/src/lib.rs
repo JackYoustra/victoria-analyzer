@@ -12,6 +12,9 @@ use crate::ParseError::MissingNode;
 
 use lazy_static::lazy_static; // 1.3.0
 use regex::Regex;
+use serde::{Deserializer, Deserialize};
+use serde_json::Error;
+use web_sys::console;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -92,11 +95,24 @@ impl<'a> Country<'a> {
     }
 }
 
-#[derive(Debug)]
-pub struct Save<'a> {
+#[wasm_bindgen]
+#[derive(Deserialize, Debug)]
+pub struct Save {
+    #[serde(deserialize_with = "vicky_date_serialize_serde")]
     date: NaiveDate,
-    player_tag: &'a str,
+    #[serde(rename = "player")]
+    player_tag: String,
     // flags: Vec<&'a str>,
+}
+
+fn vicky_date_serialize_serde<'de, D>(
+    deserializer: D,
+) -> Result<NaiveDate, D::Error>
+    where
+        D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    parse_victoria_date(&*s).map_err(serde::de::Error::custom)
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -175,59 +191,9 @@ pub fn parse_victoria_date(text: &str) -> Result<NaiveDate, ParseError> {
     }
 }
 
-impl<'a> Save<'a> {
-    pub fn new(list: Node<'a>) -> Result<Save, ParseError> {
-        return Err(MissingNode);
-        if let Node::List(thing) = list {
-            let mut date = None::<NaiveDate>;
-            let mut player_tag = None::<&'a str>;
-            let error = thing.iter().filter_map( |x| -> Option<ParseError> {
-                match x {
-                    Node::Line(("date", vec)) if date == None => {
-                        match vec.as_slice() {
-                            [Node::Leaf(raw_date)] => {
-                                match parse_victoria_date(raw_date) {
-                                    Ok(good) => {
-                                        date = Some(good);
-                                        return None
-                                    }
-                                    Err(bad) => {
-                                        return Some(bad)
-                                    }
-                                }
-                            }
-                            _ => None
-                        }
-                    },
-                    Node::Line(("player", vec)) if player_tag == None => {
-                        match vec.as_slice() {
-                            [Node::Leaf(tag)] => {
-                                player_tag = Some(unquote(tag));
-                                None
-                            }
-                            _ => None
-                        }
-                    },
-                    // All countries are three-letter words
-                    Node::Line((rootkey, vec)) => {
-                        if COUNTRY_TAG.is_match(rootkey) {
-
-                        }
-                        None
-                    },
-
-                    _ => None,
-                }
-            }).next();
-            return match error {
-                Some(err) => Err(err),
-                None => Ok(Save {
-                   date: date.unwrap(),
-                   player_tag: player_tag.unwrap(),
-               })
-            }
-        }
-        Err(MissingNode)
+impl Save {
+    pub fn new(list: Node) -> Result<Save, Error> {
+        serde_json::from_value(list.to_json())
     }
 }
 
@@ -290,7 +256,8 @@ impl<'a> Node<'a> {
                                         Node::insert_or_listify(name, &Node::Leaf(object).to_json(), &mut map, &mut stuff);
                                     }
                                     Node::Leaf(name) => {
-                                        unreachable!();
+                                        //log!("{}", name);
+                                        //unreachable!();
                                         Node::insert_or_listify(name, &serde_json::Value::Null, &mut map, &mut stuff);
                                     }
                                 }
@@ -357,9 +324,11 @@ pub fn parse_save(savetext: &str) -> Result<Node, peg::error::ParseError<peg::st
 }
 
 #[wasm_bindgen]
-pub fn process_save(savetext: &str) -> Option<String> {
-    return match save_parser::entry(savetext) {
-        Ok(_) => None,
-        Err(E) => Some(E.to_string()),
+pub fn process_save(savetext: &str) -> Result<Save, JsValue> {
+    match parse_save(savetext) {
+        Ok(entry) => {
+            Save::new(entry).map_err(|x| JsValue::from(x.to_string()))
+        },
+        Err(E) => Err(JsValue::from(E.to_string())),
     }
 }
