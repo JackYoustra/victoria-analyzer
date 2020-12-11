@@ -1,3 +1,5 @@
+#![feature(drain_filter)]
+
 mod utils;
 
 use wasm_bindgen::prelude::*;
@@ -12,9 +14,12 @@ use crate::ParseError::MissingNode;
 
 use lazy_static::lazy_static; // 1.3.0
 use regex::Regex;
-use serde::{Deserializer, Deserialize};
+use serde::{Deserializer, Deserialize, de};
 use serde_json::Error;
 use web_sys::console;
+use std::collections::HashMap;
+use serde::export::PhantomData;
+use serde::de::MapAccess;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -41,58 +46,52 @@ struct Product<'a> {
     // assert discovered good true
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-struct Building<'a> {
-    name: &'a str,
-    //money: f64,
+#[derive(Deserialize, Debug)]
+struct Building {
+    #[serde(rename = "building")]
+    name: String,
+    money: f64,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
-struct State<'a> {
-    buildings: &'a [Building<'a>],
+#[derive(Deserialize, Debug)]
+struct State {
+    #[serde(rename = "state_buildings", default)]
+    buildings: Vec<Building>,
 }
 
-impl<'a> State<'a> {
-    fn new(list: &'a Node<'a>) -> Result<State, ParseError> {
-        Err(MissingNode)
-    }
+#[derive(Deserialize, Debug)]
+struct Country {
+    tax_base: f64,
+    #[serde(deserialize_with = "string_or_seq_string", default)]
+    states: Vec<State>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
-struct Country<'a> {
-    states: Vec<State<'a>>,
-}
+fn string_or_seq_string<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+    where D: Deserializer<'de>, T: Deserialize<'de>
+{
+    struct StringOrVec<T>(PhantomData<Vec<T>>);
 
-impl<'a> Country<'a> {
-    fn new(list: Node<'a>) -> Result<Country, ParseError> {
-        if let Node::List(props) = list {
-            let mut states = None::<Vec<State>>;
-            let error = props.iter().filter_map(|x| -> Option<ParseError> {
-                match x {
-                    Node::Line(("state", vec)) if states == None => {
-                        let results: Result<Vec<State>, _> = vec.iter().map(State::new).collect();
-                        match results {
-                            Ok(stateResults) => {
-                                states = Some(stateResults);
-                                None
-                            },
-                            Err(bad) => Some(bad)
-                        }
-                    },
+    impl<'de, T: Deserialize<'de>> de::Visitor<'de> for StringOrVec<T> {
+        type Value = Vec<T>;
 
-                    _ => None,
-                }
-            }).next();
-            return match error {
-                Some(err) => Err(err.clone()),
-                None => Ok(Country {
-                    // states: states.unwrap(),
-                    states: vec![],
-                })
-            }
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("string or list of strings")
         }
-        Err(MissingNode)
+
+        fn visit_seq<S>(self, visitor: S) -> Result<Self::Value, S::Error>
+            where S: de::SeqAccess<'de>
+        {
+            Deserialize::deserialize(de::value::SeqAccessDeserializer::new(visitor))
+        }
+
+        fn visit_map<A>(self, value: A) -> Result<Self::Value, A::Error>
+            where A: MapAccess<'de>,
+        {
+            T::deserialize(de::value::MapAccessDeserializer::new(value)).map(|x| vec![x])
+        }
     }
+
+    deserializer.deserialize_any(StringOrVec(PhantomData))
 }
 
 #[wasm_bindgen]
@@ -102,7 +101,18 @@ pub struct Save {
     date: NaiveDate,
     #[serde(rename = "player")]
     player_tag: String,
-    // flags: Vec<&'a str>,
+    // USA: Country,
+    /// Hack:
+    /// we know we want all aliases that are country tags,
+    /// so we'll accept all all uppercase sequences of characters of size two or three
+    /// (26^2 + 26^3) = 18252. Not great. I actually tried this and it killed the compiler. Sad!
+    /// The problem is around line 1168 on serde-rs's de.rs. It does explicit checking, not pattern
+    /// matching against valid rust patterns (we could use that to our advantage as we did with the
+    /// PEG parser). Additionally, it wouldn't populate a hashmap like we want - just a vec.
+    /// This is surmountable (can infer country from other tags) but irrelevant because we can't actually do that.
+    /// Solution: create an artificial countries tag somewhere else to do what we want.
+    #[serde(default)]
+    countries: HashMap<String, Country>,
 }
 
 fn vicky_date_serialize_serde<'de, D>(
@@ -229,7 +239,28 @@ impl<'a> Node<'a> {
         }
     }
 
-    // convert a function to serde's json
+    /// In-place modify to be parseable.
+    /// See the comment above for countries for rationale.
+    /// Call on root.
+    pub fn raise(&mut self) {
+        if let Node::List(nodes) = self {
+            // Get the first country index
+            if let Some(country_index) = nodes.iter().position(Node::is_country) {
+                // Drain all countries
+                let country_list: Vec<Node> = nodes.drain_filter(|x| x.is_country()).collect();
+                nodes.insert(country_index, Node::Line(("countries", country_list)));
+            }
+        }
+    }
+
+    fn is_country(&self) -> bool {
+        match self {
+            Node::Line((name, _)) => COUNTRY_TAG.is_match(name),
+            _ => false,
+        }
+    }
+
+    /// convert a function to serde's json
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             Node::Line((_, arr)) | Node::List(arr) => {

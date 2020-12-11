@@ -59,8 +59,9 @@ fn manual_test() {
         employees_expression
     ]);
     let result = date_string.to_owned() + "\n" + unit_string + "\n" + employees_string;
-    let result = parse_save(&result).unwrap();
+    let mut result = parse_save(&result).unwrap();
     assert_eq!(result, combined_expression);
+    result.raise();
     assert_eq!(result.to_json(), serde_json::json!({
         "date": "1921.12.29",
         "unit_cost": {
