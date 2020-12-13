@@ -6,20 +6,22 @@ use wasm_bindgen::prelude::*;
 use peg;
 use chrono::NaiveDate;
 use std::num::ParseIntError;
-use core::fmt;
 use std::error;
+use std::fmt;
 
 use serde_json;
+use serde_with::{ serde_as, DefaultOnError };
 use crate::ParseError::MissingNode;
 
 use lazy_static::lazy_static; // 1.3.0
 use regex::Regex;
 use serde::{Deserializer, Deserialize, de};
-use serde_json::Error;
+use serde_json::{Error, Value};
 use web_sys::console;
 use std::collections::HashMap;
 use serde::export::PhantomData;
-use serde::de::MapAccess;
+use crate::utils::set_panic_hook;
+use std::collections::hash_map::RandomState;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -31,6 +33,7 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 // Regexes
 lazy_static! {
     static ref COUNTRY_TAG: Regex = Regex::new(r"^[A-Z]{3}$").unwrap();
+    static ref PROVINCE_TAG: Regex = Regex::new(r"^[0-9]*$").unwrap();
 }
 
 #[wasm_bindgen]
@@ -46,6 +49,45 @@ struct Product<'a> {
     // assert discovered good true
 }
 
+#[derive(Deserialize, Debug, PartialEq)]
+pub struct Pop {
+    /// Presumably the money deposited in the national bank
+    #[serde(default)]
+    bank: f64,
+    /// Presumably the money on-hand
+    money: f64,
+    /// The pop size
+    size: i64,
+    /// The pop ID
+    id: i32,
+}
+
+impl Pop {
+    pub fn new(bank: f64, money: f64, size: i64, id: i32) -> Self {
+        Pop { bank, money, size, id }
+    }
+}
+
+#[serde_as]
+#[derive(Deserialize, Debug, PartialEq)]
+pub struct Province {
+    name: String,
+    #[serde(default)]
+    owner: Option<String>,
+    /// Small hack: make the remainder pops.
+    /// This, shockingly, actually works for any subfield we can think of,
+    /// so it's actually the magic backtracking we were looking for all along
+    #[serde(flatten)]
+    #[serde_as(as="HashMap<DefaultOnError, DefaultOnError>")]
+    pops: HashMap<String, Option<Pop>>,
+}
+
+impl Province {
+    pub fn new(name: String, owner: Option<String>, pops: HashMap<String, Option<Pop>, RandomState>) -> Self {
+        Province { name, owner, pops }
+    }
+}
+
 #[derive(Deserialize, Debug)]
 struct Building {
     #[serde(rename = "building")]
@@ -53,45 +95,43 @@ struct Building {
     money: f64,
 }
 
+#[serde_as]
+#[derive(Deserialize, Debug)]
+struct StateID {
+    #[serde_as(as="DefaultOnError")]
+    id: i32,
+    #[serde(rename = "type")]
+    #[serde_as(as="DefaultOnError")]
+    state_type: i32,
+}
+
+/// A state owned by a country
 #[derive(Deserialize, Debug)]
 struct State {
     #[serde(rename = "state_buildings", default)]
+    #[serde_as(as="Vec<DefaultOnError>")]
     buildings: Vec<Building>,
+    // What are these?
+    #[serde(default)]
+    #[serde_as(as="DefaultOnError")]
+    savings: f64,
+    #[serde(default)]
+    #[serde_as(as="DefaultOnError")]
+    interest: f64,
+    id: StateID,
+    #[serde(rename = "provinces")]
+    #[serde_as(as="DefaultOnError")]
+    province_ids: Vec<i32>,
 }
 
+#[serde_as]
 #[derive(Deserialize, Debug)]
 struct Country {
     tax_base: f64,
-    #[serde(deserialize_with = "string_or_seq_string", default)]
+    // Don't count single-state countries rn
+    #[serde(rename="state", default)]
+    #[serde_as(as="DefaultOnError")]
     states: Vec<State>,
-}
-
-fn string_or_seq_string<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
-    where D: Deserializer<'de>, T: Deserialize<'de>
-{
-    struct StringOrVec<T>(PhantomData<Vec<T>>);
-
-    impl<'de, T: Deserialize<'de>> de::Visitor<'de> for StringOrVec<T> {
-        type Value = Vec<T>;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("string or list of strings")
-        }
-
-        fn visit_seq<S>(self, visitor: S) -> Result<Self::Value, S::Error>
-            where S: de::SeqAccess<'de>
-        {
-            Deserialize::deserialize(de::value::SeqAccessDeserializer::new(visitor))
-        }
-
-        fn visit_map<A>(self, value: A) -> Result<Self::Value, A::Error>
-            where A: MapAccess<'de>,
-        {
-            T::deserialize(de::value::MapAccessDeserializer::new(value)).map(|x| vec![x])
-        }
-    }
-
-    deserializer.deserialize_any(StringOrVec(PhantomData))
 }
 
 #[wasm_bindgen]
@@ -111,8 +151,43 @@ pub struct Save {
     /// PEG parser). Additionally, it wouldn't populate a hashmap like we want - just a vec.
     /// This is surmountable (can infer country from other tags) but irrelevant because we can't actually do that.
     /// Solution: create an artificial countries tag somewhere else to do what we want.
-    #[serde(default)]
     countries: HashMap<String, Country>,
+
+    /// Same hack as countries
+    provinces: HashMap<i32, Province>,
+}
+
+impl Save {
+    /// Just return country -> treasury, wealth by state -> wealth by factory / pop (per province)
+    pub fn forex_position(&self) -> HashMap<&str, (f64, HashMap<i32, (HashMap<&str, f64>, HashMap<&str, HashMap<&str, f64>>)>)> {
+        self.countries.iter().map(|(name, country)| {
+            (name.as_str(), (country.tax_base, country.states.iter()
+                .map(|state| {
+                    (state.id.id , (
+                             state.buildings.iter().map(|building| (building.name.as_str(), building.money)).collect::<HashMap<&str, f64>>(),
+                            state.province_ids.iter()
+                            .map(|x| self.provinces.get(x).unwrap())
+                            .filter(|x| x.owner.as_ref().map(|unwrapper| unwrapper) == Some(name))
+                            .map(|x| {
+                                (x.name.as_str(), x.pops.iter().filter_map(|(title, pop)| -> Option<(&str, f64)> {
+                                    pop.as_ref().map(|x| (title.as_str(), x.bank + x.money))
+                                }).collect::<HashMap<&str, f64>>())
+                            }).collect::<HashMap<&str, HashMap<&str, f64>>>()
+                         ))
+                    }
+                ).collect()))
+        }).collect()
+    }
+
+    /// Just return country -> treasury + wealth by state. For testing purposes
+    pub fn forex_diagnostic(&self) -> HashMap<&str, f64> {
+        self.countries.iter().map(|(name, country)| {
+            log!("{:?}", country.states);
+            (name.as_str(), country.states.iter()
+                .fold(0.0, |acc, x| acc + x.buildings.iter()
+                    .fold(0.0, |buildingacc, building| buildingacc + building.money) ) )
+        }).collect()
+    }
 }
 
 fn vicky_date_serialize_serde<'de, D>(
@@ -245,17 +320,23 @@ impl<'a> Node<'a> {
     pub fn raise(&mut self) {
         if let Node::List(nodes) = self {
             // Get the first country index
-            if let Some(country_index) = nodes.iter().position(Node::is_country) {
-                // Drain all countries
-                let country_list: Vec<Node> = nodes.drain_filter(|x| x.is_country()).collect();
-                nodes.insert(country_index, Node::Line(("countries", country_list)));
+            for (name, tag) in [("provinces", &*PROVINCE_TAG), ("countries", &*COUNTRY_TAG)].iter() {
+                if let Some(country_index) = nodes.iter().position(|x| x.is_matching(tag)) {
+                    // Drain all countries
+                    let country_list: Vec<Node> = nodes.drain_filter(|x| x.is_matching(tag)).collect();
+                    nodes.insert(country_index, Node::Line((name, country_list)));
+                }
             }
+            // log!("{:?}", nodes.iter().filter_map(|x| match x {
+            //     Node::Line((txt, _)) | Node::SingleElementLine((txt, _)) => Some(txt),
+            //     _ => None,
+            // }).fold(String::new(), |s, arg| s + &arg + " "));
         }
     }
 
-    fn is_country(&self) -> bool {
+    fn is_matching(&self, re: &Regex) -> bool {
         match self {
-            Node::Line((name, _)) => COUNTRY_TAG.is_match(name),
+            Node::Line((name, _)) => re.is_match(name),
             _ => false,
         }
     }
