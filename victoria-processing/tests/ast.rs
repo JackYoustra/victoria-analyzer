@@ -15,26 +15,39 @@ fn file_test() {
     let save_result = Save::new(save_value.clone());
     assert_matches!(save_result, Ok(_));
     let save_result = save_result.unwrap();
-    let forex_diag = save_result.forex_diagnostic();
-    assert_eq!(forex_diag.len(), 221);
-    assert_eq!(forex_diag["ENG"], 520784621.5579901);
-    assert_eq!(forex_diag["USA"], 802537723.3783101);
-    // Eventually, want single-states to have balances reflected here
-    assert_eq!(forex_diag["CRE"], 0.0);
-    // Because we're not counting single-states, we want to make sure we don't accidentally include single states++_
-    assert_eq!(forex_diag.values().filter(|x| x == &&0.0).count(), 181);
 
     let forex = save_result.forex_position();
+    // Because we're counting all states, we want to make sure everyone who has a state (in existence) is counted
+    // console_log!("{:?}", forex.iter().filter(|(name, (x, _))| x == &0.0).map(|(name, _)| name).collect::<Vec<&&str>>());
+    // Should be eight bankrupt countries
+    assert_eq!(forex.values().filter(|(x, _)| x == &0.0).count(), 8);
+    // Make sure single state is counted
+    // Country: LUA: Single(State { buildings: Many([Building { name: "\"liquor_distillery\"", money: 1000000.0 }, Building { name: "\"regular_clothes_factory\"", money: 693054.63766 }]), savings: 542.49167, interest: 1840.22009, id: StateID { id: 1091, state_type: 47 }, province_ids: [1356, 1362] }
+    let (treasury, wealth_by_state) = &forex["LUA"];
+    assert_eq!(treasury.clone(), 7538.23181);
+    // Just one state - lots of single tests here
+    let (factories, provinces) = &wealth_by_state[&1091];
+    // Two factories
+    let factory_wealth = factories[&"\"liquor_distillery\""];
+    assert_eq!(factory_wealth, 1000000.0);
+    let factory_wealth = factories[&"\"regular_clothes_factory\""];
+    assert_eq!(factory_wealth, 693054.63766);
+    // Two provinces
+    let province = &provinces[&"\"Salavan\""];
+    let pop = province["craftsmen"];
+    assert_eq!(pop, 395.94034);
+    let province = &provinces[&"\"Luang"];
+    let pop = province["capitalists"];
+    assert_eq!(pop, 244017.08801);
+
+    // And now do it on a GP
     let (treasury, wealth_by_state) = &forex["USA"];
-    assert_eq!(treasury.clone(), 29636.93976);
-    console_log!("{:?}", wealth_by_state.keys());
-    let (factories, provinces) = &wealth_by_state[&1];
-    console_log!("{:?}", factories.keys());
-    let factory_wealth = factories[&"hello"];
-    assert_eq!(factory_wealth, 100.0);
-    console_log!("{:?}", provinces.keys());
-    let province = &provinces[&"hello"];
-    console_log!("{:?}", province.keys());
-    let pop = province[&"labourer"];
-    assert_eq!(pop, 100.0);
+    assert_eq!(treasury.clone(), 5333614.26907);
+    let (factories, provinces) = &wealth_by_state[&1293];
+    let factory_wealth = factories[&"\"furniture_factory\""];
+    assert_eq!(factory_wealth, 2000000.0);
+    // ID #1
+    let province = &provinces[&"\"Sitka\""];
+    let pop = province["labourers"];
+    assert_eq!(pop, 533502.6074);
 }

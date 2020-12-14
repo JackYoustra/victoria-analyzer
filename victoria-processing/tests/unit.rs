@@ -3,7 +3,7 @@
 
 use wasm_bindgen_test::*;
 use chrono::NaiveDate;
-use victoria_processing::{parse_victoria_date, unquote, Province, Pop};
+use victoria_processing::{parse_victoria_date, unquote, Province, Pop, SingleOrMany};
 use serde_json::json;
 use std::collections::HashMap;
 
@@ -58,9 +58,9 @@ fn test_province() {
     // Serde should ensure correctness of the rest
     let result = serde_json::from_value::<Province>(json).unwrap();
     let map: HashMap<_, _> = collection! {
-     "labourers".to_owned() => Some(Pop::new(500.0, 10.0, 10, 1)),
-     "officers".to_owned() => Some(Pop::new(0.0, 100.0, 100, 99999)) ,
-     "randomything".to_owned() => None,
+     "labourers".to_owned() => SingleOrMany::Single(Pop::new(500.0, 10.0, 10, 1)),
+     "officers".to_owned() => SingleOrMany::Single(Pop::new(0.0, 100.0, 100, 99999)) ,
+     "randomything".to_owned() => SingleOrMany::None,
      };
     assert_eq!(result, Province::new(
         "\"Skita\"".to_string(),

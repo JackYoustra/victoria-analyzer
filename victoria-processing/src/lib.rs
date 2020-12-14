@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
 use peg;
 use chrono::NaiveDate;
 use std::num::ParseIntError;
-use std::error;
+use std::{error, iter};
 use std::fmt;
 
 use serde_json;
@@ -79,11 +79,11 @@ pub struct Province {
     /// so it's actually the magic backtracking we were looking for all along
     #[serde(flatten)]
     #[serde_as(as="HashMap<DefaultOnError, DefaultOnError>")]
-    pops: HashMap<String, Option<Pop>>,
+    pops: HashMap<String, SingleOrMany<Pop>>,
 }
 
 impl Province {
-    pub fn new(name: String, owner: Option<String>, pops: HashMap<String, Option<Pop>, RandomState>) -> Self {
+    pub fn new(name: String, owner: Option<String>, pops: HashMap<String, SingleOrMany<Pop>, RandomState>) -> Self {
         Province { name, owner, pops }
     }
 }
@@ -95,13 +95,10 @@ struct Building {
     money: f64,
 }
 
-#[serde_as]
 #[derive(Deserialize, Debug)]
 struct StateID {
-    #[serde_as(as="DefaultOnError")]
     id: i32,
     #[serde(rename = "type")]
-    #[serde_as(as="DefaultOnError")]
     state_type: i32,
 }
 
@@ -109,29 +106,49 @@ struct StateID {
 #[derive(Deserialize, Debug)]
 struct State {
     #[serde(rename = "state_buildings", default)]
-    #[serde_as(as="Vec<DefaultOnError>")]
-    buildings: Vec<Building>,
+    buildings: SingleOrMany<Building>,
     // What are these?
     #[serde(default)]
-    #[serde_as(as="DefaultOnError")]
     savings: f64,
     #[serde(default)]
-    #[serde_as(as="DefaultOnError")]
     interest: f64,
     id: StateID,
     #[serde(rename = "provinces")]
-    #[serde_as(as="DefaultOnError")]
-    province_ids: Vec<i32>,
+    province_ids: SingleOrMany<i32>,
 }
 
-#[serde_as]
 #[derive(Deserialize, Debug)]
 struct Country {
+    money: f64,
     tax_base: f64,
     // Don't count single-state countries rn
     #[serde(rename="state", default)]
-    #[serde_as(as="DefaultOnError")]
-    states: Vec<State>,
+    states: SingleOrMany<State>,
+}
+
+#[derive(Deserialize, Debug, PartialEq)]
+#[serde(untagged)]
+pub enum SingleOrMany<T> {
+    Single(T),
+    Many(Vec<T>),
+    None,
+}
+
+impl<T> Default for SingleOrMany<T> {
+    fn default() -> Self {
+        SingleOrMany::None
+    }
+}
+
+impl<T> SingleOrMany<T> {
+    // https://stackoverflow.com/a/30220832/998335
+    fn values(&self) -> Box<dyn Iterator<Item = &T> + '_> {
+        match self {
+            SingleOrMany::None => Box::new(iter::empty()),
+            SingleOrMany::Single(elem) => Box::new(iter::once(elem)),
+            SingleOrMany::Many(elems) => Box::new(elems.iter()),
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -159,34 +176,34 @@ pub struct Save {
 
 impl Save {
     /// Just return country -> treasury, wealth by state -> wealth by factory / pop (per province)
-    pub fn forex_position(&self) -> HashMap<&str, (f64, HashMap<i32, (HashMap<&str, f64>, HashMap<&str, HashMap<&str, f64>>)>)> {
+    pub fn forex_position(&self) -> HashMap<&str, (f64, HashMap<i32, (HashMap<&str, f64>, HashMap<&str, HashMap<String, f64>>)>)> {
         self.countries.iter().map(|(name, country)| {
-            (name.as_str(), (country.tax_base, country.states.iter()
+            (name.as_str(), (country.money, country.states.values()
                 .map(|state| {
                     (state.id.id , (
-                             state.buildings.iter().map(|building| (building.name.as_str(), building.money)).collect::<HashMap<&str, f64>>(),
-                            state.province_ids.iter()
+                             state.buildings.values().map(|building| (building.name.as_str(), building.money)).collect::<HashMap<&str, f64>>(),
+                            state.province_ids.values()
                             .map(|x| self.provinces.get(x).unwrap())
-                            .filter(|x| x.owner.as_ref().map(|unwrapper| unwrapper) == Some(name))
+                            .filter(|x| x.owner.as_ref().map(|unwrapper| unquote(unwrapper) == name).unwrap_or(false))
                             .map(|x| {
-                                (x.name.as_str(), x.pops.iter().filter_map(|(title, pop)| -> Option<(&str, f64)> {
-                                    pop.as_ref().map(|x| (title.as_str(), x.bank + x.money))
-                                }).collect::<HashMap<&str, f64>>())
-                            }).collect::<HashMap<&str, HashMap<&str, f64>>>()
+                                (x.name.as_str(), x.pops.iter()
+                                    .flat_map(|(title, pop)| {
+                                        pop.values().enumerate().map(move |(index, x)| (numerate(index, title.to_string()), x.bank + x.money))
+                                    })
+                                    .collect::<HashMap<String, f64>>())
+                            }).collect::<HashMap<&str, HashMap<String, f64>>>()
                          ))
                     }
                 ).collect()))
         }).collect()
     }
+}
 
-    /// Just return country -> treasury + wealth by state. For testing purposes
-    pub fn forex_diagnostic(&self) -> HashMap<&str, f64> {
-        self.countries.iter().map(|(name, country)| {
-            log!("{:?}", country.states);
-            (name.as_str(), country.states.iter()
-                .fold(0.0, |acc, x| acc + x.buildings.iter()
-                    .fold(0.0, |buildingacc, building| buildingacc + building.money) ) )
-        }).collect()
+fn numerate(index: usize, thing: String) -> String {
+    if index == 0 {
+        thing
+    } else {
+        thing + (index + 1).to_string().as_str()
     }
 }
 
@@ -327,10 +344,6 @@ impl<'a> Node<'a> {
                     nodes.insert(country_index, Node::Line((name, country_list)));
                 }
             }
-            // log!("{:?}", nodes.iter().filter_map(|x| match x {
-            //     Node::Line((txt, _)) | Node::SingleElementLine((txt, _)) => Some(txt),
-            //     _ => None,
-            // }).fold(String::new(), |s, arg| s + &arg + " "));
         }
     }
 
