@@ -5,6 +5,7 @@ import CircularIntegration, { ProcessTypes } from "./Components/Progress";
 import { createStyles, makeStyles, Theme } from "@material-ui/core/styles";
 import { green } from "@material-ui/core/colors";
 import VictoriaSunburst from "./Components/VictoriaSunburst";
+import { D3Node } from "victoria-processing";
 // @ts-ignore
 const rust = import('victoria-processing');
 
@@ -24,7 +25,7 @@ const useStyles = makeStyles((theme: Theme) =>
 
 function App() {
   const [processState, setProcessState] = useState(ProcessTypes.initial);
-  const [wealthDistribution, setWealthDistribution] = useState<any | null>(null);
+  const [wealthDistribution, setWealthDistribution] = useState<D3Node | undefined>(undefined);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const classes = useStyles();
 
@@ -40,8 +41,7 @@ function App() {
             const save = created.process_save(result)
             setProcessState(ProcessTypes.success)
             const forex = save.js_forex_position();
-            const chinese_states = forex.js_subtree_for_node([], 2)
-            setWealthDistribution(chinese_states);
+            setWealthDistribution(forex);
           }).catch(error => {
             console.error(error)
             setProcessState(ProcessTypes.failed)

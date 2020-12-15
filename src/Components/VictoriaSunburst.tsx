@@ -1,9 +1,11 @@
-import React, { useRef, useState } from 'react';
+import React, { MouseEventHandler, useCallback, useEffect, useRef, useState } from 'react';
 import { NormalizedDatum, ResponsiveSunburst } from '@nivo/sunburst'
 import { useTheme } from '@nivo/core'
+import { D3Node } from "victoria-processing";
+import Button from "@material-ui/core/Button";
 
 interface SunburstProps {
-  data?: any,
+  data?: D3Node,
 }
 
 // https://stackoverflow.com/a/16233919/998335
@@ -16,32 +18,61 @@ const formatter = new Intl.NumberFormat('en-US', {
   //maximumFractionDigits: 0, // (causes 2500.99 to be printed as $2,501)
 });
 
-const CustomTooltip = ({ id, value, color }: NormalizedDatum<unknown>) => {
+const CustomTooltip = ({ data, value, color }: NormalizedDatum<unknown>) => {
   const theme = useTheme()
-
   return (
     <strong style={{ ...theme.tooltip.container, color }}>
-      {id}: {formatter.format(value)}
+      {
+        // @ts-ignore
+        data.name
+      }: {formatter.format(value)}
     </strong>
   )
 }
 
+// @ts-ignore
+const flatten = (data: any[]) =>
+  data.reduce((acc, item) => {
+    if (item.children) {
+      return [...acc, item, ...flatten(item.children)]
+    }
+
+    return [...acc, item]
+  }, [])
+
+const findObject = (data: any[], id: React.ReactText) => data.find(searchedName => searchedName.id === id)
+
 export default function VictoriaSunburst(props: SunburstProps) {
-  if (!props.data) {
+  const [chartData, setChartData] = useState<any | null>(null);
+  const [pieStack, setPieStack] = useState<any[]>([]);
+
+  useEffect(() => {
+    const chart_data = props.data?.js_subtree_for_node([], 500);
+    // console.log("Set chart data to " + JSON.stringify(chart_data));
+    setChartData(chart_data);
+    setPieStack([chart_data]);
+  }, [props.data])
+
+  if (!chartData) {
     return (<></>)
   }
   return (
-    <div style={{ height: '500px', width: '500px' }}>
+    <div style={{ height: '600px', width: '500px' }}>
+      <Button
+        variant="contained"
+        color="primary"
+        disabled={pieStack.length <= 1}
+        onClick={() => {
+          setPieStack(pieStack.slice(0, pieStack.length - 1));
+          setChartData(pieStack[pieStack.length - 2]);
+        }}
+      >
+        Up a level
+      </Button>
       <ResponsiveSunburst
-        data={props.data}
-        // height={500}
-        // width={500}
-        // getLabel={(d: { name: any; }) => d.name}
-        // getSize={(d: { size: any; }) => d.size}
-        // padAngle={() => 0.02}
-        // getColor={() => pallette.next()}
+        data={chartData}
         margin={{ top: 40, right: 20, bottom: 20, left: 20 }}
-        id="name"
+        id="id"
         value="size"
         cornerRadius={2}
         borderWidth={1}
@@ -60,6 +91,15 @@ export default function VictoriaSunburst(props: SunburstProps) {
             },
           },
         }}
+        onClick={clickedData => {
+          const foundObject = findObject(flatten(chartData.children), clickedData.id)
+          if (foundObject && foundObject.children) {
+            console.log("Zoom chart data to " + JSON.stringify(foundObject));
+            setPieStack([...pieStack, foundObject]);
+            setChartData(foundObject);
+          }
+        }}
+        enableSliceLabels={true}
       />
     </div>
   );

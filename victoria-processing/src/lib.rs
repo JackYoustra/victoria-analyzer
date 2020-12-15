@@ -178,19 +178,20 @@ pub struct Save {
 #[wasm_bindgen]
 impl Save {
     pub fn js_forex_position(&self) -> D3Node {
+        let mut generator = (0u64..);
         let forex = self.forex_position();
-        D3Node::parent("Forex".to_string(),
+        D3Node::parent(generator.nth(0).unwrap(), "Forex".to_string(),
             forex.iter().map(|(countryname, (treasury, statewealth))| {
-                D3Node::parent(countryname.to_string(),
+                D3Node::parent(generator.nth(0).unwrap(), countryname.to_string(),
                     vec![
-                        D3Node::leaf("Treasury".to_string(), *treasury),
-                        D3Node::parent("States".to_string(),
+                        D3Node::leaf(generator.nth(0).unwrap(), "Treasury".to_string(), *treasury),
+                        D3Node::parent(generator.nth(0).unwrap(), "States".to_string(),
                             statewealth.iter().map(|(state_id, (factories, provinces))| {
-                                 D3Node::parent(state_id.to_string(), vec![
-                                     D3Node::parent("Factories".to_string(), factories.iter().map(|(x, y)|D3Node::leaf(x.to_string(), *y)).collect()),
-                                     D3Node::parent("Provinces".to_string(), provinces.iter().map(|(province, pop)| {
-                                         D3Node::parent(province.to_string(), pop.iter().map(|(title, wealth)| {
-                                             D3Node::leaf(title.to_string(), *wealth)
+                                 D3Node::parent(generator.nth(0).unwrap(), state_id.to_string(), vec![
+                                     D3Node::parent(generator.nth(0).unwrap(), "Factories".to_string(), factories.iter().map(|(x, y)|D3Node::leaf(generator.nth(0).unwrap(), x.to_string(), *y)).collect()),
+                                     D3Node::parent(generator.nth(0).unwrap(), "Provinces".to_string(), provinces.iter().map(|(province, pop)| {
+                                         D3Node::parent(generator.nth(0).unwrap(), province.to_string(), pop.iter().map(|(title, wealth)| {
+                                             D3Node::leaf(generator.nth(0).unwrap(), title.to_string(), *wealth)
                                          }).collect())
                                      }).collect())
                                 ])
@@ -205,6 +206,7 @@ impl Save {
 #[wasm_bindgen]
 #[derive(Serialize, Clone, Debug)]
 pub struct D3Node {
+    id: u64,
     name: String,
     #[serde(flatten)]
     atom: D3Atomic,
@@ -212,12 +214,12 @@ pub struct D3Node {
 
 impl D3Node {
     // For tests
-    pub fn parent(name: String, children: Vec<D3Node>) -> Self {
-        D3Node { name, atom: D3Atomic::Parent{ children } }
+    pub fn parent(id: u64, name: String, children: Vec<D3Node>) -> Self {
+        D3Node { id, name, atom: D3Atomic::Parent{ children } }
     }
 
-    pub fn leaf(name: String, atom: f64) -> Self {
-        D3Node { name, atom: D3Atomic::Leaf{ size: atom } }
+    pub fn leaf(id: u64, name: String, atom: f64) -> Self {
+        D3Node { id, name, atom: D3Atomic::Leaf{ size: atom } }
     }
 
     pub fn atom(&self) -> &D3Atomic {
@@ -238,7 +240,7 @@ impl D3Node {
 
     pub fn cauterize(&self, depth: u32) -> D3Node {
         if depth == 0 {
-            D3Node::leaf(self.name.to_string(), self.children_value())
+            D3Node::leaf(self.id, self.name.to_string(), self.children_value())
         } else {
             match &self.atom {
                 D3Atomic::Parent { children } => {
@@ -247,11 +249,16 @@ impl D3Node {
                     let stream = children.iter().map(|x| x.cauterize(depth - 1)).collect::<Vec<D3Node>>();
                     let values = stream.iter().map(|x| x.children_value()).collect::<Vec<f64>>();
                     let total: f64 = values.iter().sum();
-                    let kept = stream.iter().enumerate().filter(|(idx, _)| values[*idx] > (total * 0.01)).map(|(_, y)| y.clone()).collect();
-                    D3Node::parent(self.name.to_string(), kept)
+                    let mut keptTotal: f64 = 0.0;
+                    let mut kept: Vec<D3Node> = stream.iter().enumerate().filter(|(idx, _)| values[*idx] > (total * 0.01)).map(|(idx, y)| {
+                        keptTotal += values[idx];
+                        y.clone()
+                    }).collect();
+                    // kept.push(D3Node::leaf("Other".to_string(), keptTotal));
+                    D3Node::parent(self.id, self.name.to_string(), kept)
                 }
                 // gdi I can't borrow anything 'cause of that one stupid int parse
-                D3Atomic::Leaf { size: loc } => D3Node::leaf(self.name.to_string(), *loc )
+                D3Atomic::Leaf { size: loc } => D3Node::leaf(self.id, self.name.to_string(), *loc )
             }
         }
     }
