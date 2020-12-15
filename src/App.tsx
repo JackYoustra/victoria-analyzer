@@ -1,9 +1,10 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import logo from './logo.svg';
 import './App.css';
 import CircularIntegration, { ProcessTypes } from "./Components/Progress";
 import { createStyles, makeStyles, Theme } from "@material-ui/core/styles";
 import { green } from "@material-ui/core/colors";
+import VictoriaSunburst from "./Components/VictoriaSunburst";
 // @ts-ignore
 const rust = import('victoria-processing');
 
@@ -22,7 +23,8 @@ const useStyles = makeStyles((theme: Theme) =>
 );
 
 function App() {
-  const [processState, setProcessState] = React.useState(ProcessTypes.initial);
+  const [processState, setProcessState] = useState(ProcessTypes.initial);
+  const [wealthDistribution, setWealthDistribution] = useState<any | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const classes = useStyles();
 
@@ -35,8 +37,11 @@ function App() {
         const result = reader.result as string // has to be, because we read as text
         if (result) {
           rust.then(created => {
-            created.process_save(result)
+            const save = created.process_save(result)
             setProcessState(ProcessTypes.success)
+            const forex = save.js_forex_position();
+            const chinese_states = forex.js_subtree_for_node(["CHI"], 1)
+            setWealthDistribution(chinese_states);
           }).catch(error => {
             console.error(error)
             setProcessState(ProcessTypes.failed)
@@ -67,6 +72,7 @@ function App() {
         <p>
           Victoria econ viewer.
         </p>
+        <VictoriaSunburst data={wealthDistribution}/>
         <input id="myInput"
                type="file"
                ref={inputRef}

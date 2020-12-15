@@ -15,7 +15,7 @@ use crate::ParseError::MissingNode;
 
 use lazy_static::lazy_static; // 1.3.0
 use regex::Regex;
-use serde::{Deserializer, Deserialize, de};
+use serde::{Deserializer, Deserialize, Serialize, de};
 use serde_json::{Error, Value};
 use web_sys::console;
 use std::collections::HashMap;
@@ -97,6 +97,7 @@ struct Building {
 
 #[derive(Deserialize, Debug)]
 struct StateID {
+    // Name in a localization file
     id: i32,
     #[serde(rename = "type")]
     state_type: i32,
@@ -174,8 +175,115 @@ pub struct Save {
     provinces: HashMap<i32, Province>,
 }
 
+#[wasm_bindgen]
 impl Save {
-    /// Just return country -> treasury, wealth by state -> wealth by factory / pop (per province)
+    pub fn js_forex_position(&self) -> D3Node {
+        let forex = self.forex_position();
+        D3Node::parent("Forex".to_string(),
+            forex.iter().map(|(countryname, (treasury, statewealth))| {
+                D3Node::parent(countryname.to_string(),
+                    vec![
+                        D3Node::leaf("Treasury".to_string(), *treasury),
+                        D3Node::parent("States".to_string(),
+                            statewealth.iter().map(|(state_id, (factories, provinces))| {
+                                 D3Node::parent(state_id.to_string(), vec![
+                                     D3Node::parent("Factories".to_string(), factories.iter().map(|(x, y)|D3Node::leaf(x.to_string(), *y)).collect()),
+                                     D3Node::parent("Provinces".to_string(), provinces.iter().map(|(province, pop)| {
+                                         D3Node::parent(province.to_string(), pop.iter().map(|(title, wealth)| {
+                                             D3Node::leaf(title.to_string(), *wealth)
+                                         }).collect())
+                                     }).collect())
+                                ])
+                            }).collect())
+                    ]
+                )
+            }).collect()
+        )
+    }
+}
+
+#[wasm_bindgen]
+#[derive(Serialize, Clone, Debug)]
+pub struct D3Node {
+    name: String,
+    #[serde(flatten)]
+    atom: D3Atomic,
+}
+
+impl D3Node {
+    pub fn parent(name: String, children: Vec<D3Node>) -> Self {
+        D3Node { name, atom: D3Atomic::Parent{ children } }
+    }
+
+    pub fn leaf(name: String, atom: f64) -> Self {
+        D3Node { name, atom: D3Atomic::Leaf{ loc: atom } }
+    }
+
+    fn children_value(&self) -> f64 {
+        match &self.atom {
+            D3Atomic::Parent { children } => children.iter().map(D3Node::children_value).sum(),
+            D3Atomic::Leaf { loc } => *loc,
+        }
+    }
+
+    fn cauterize(&self, depth: u32) -> D3Node {
+        if depth == 0 {
+            D3Node::leaf(self.name.to_string(), self.children_value())
+        } else {
+            match &self.atom {
+                D3Atomic::Parent { children } => {
+                    D3Node::parent(self.name.to_string(),  children.iter().map(|x| x.cauterize(depth - 1)).collect())
+                }
+                // gdi I can't borrow anything 'cause of that one stupid int parse
+                D3Atomic::Leaf { loc } => D3Node::leaf(self.name.to_string(), *loc )
+            }
+        }
+    }
+
+    // Everything from the end of the keypad down to depth, as truncated
+    // For forex -> chi -> states -> etc
+    // keypath = [CHI], depth = 1 => chi at root, all of the states under it, and nothing else
+    fn subtree_for_node<T: AsRef<str>>(&self, key_path: &[T], depth: u32) -> Result<D3Node, String> {
+        match key_path.first() {
+            None => {
+                // Navigate down depth
+                Ok(self.cauterize(depth))
+            }
+            Some(name) => {
+                // Navigate down keypath
+                let name = name.as_ref();
+                match &self.atom {
+                    D3Atomic::Parent {children: child} => {
+                        match child.iter().find(|x| x.name.as_str() == name) {
+                            Some(element) => element.subtree_for_node(&key_path[1..], depth),
+                            None => Err(format!("Expected to find {} in {} (found {:?})", name, &self.name, child))
+                        }
+                    }
+                    _ => Err(format!("Expected {} to be a parent", &self.name))
+                }
+            }
+        }
+    }
+}
+
+#[wasm_bindgen]
+impl D3Node {
+    pub fn js_subtree_for_node(&self, key_path: JsValue, depth: u32) -> Result<JsValue, JsValue> {
+        let keypath = key_path.into_serde::<Vec<String>>().map_err(|x| JsValue::from(x.to_string()))?;
+        let subtree = self.subtree_for_node(&keypath, depth).map_err(|x| JsValue::from(x.to_string()))?;
+        JsValue::from_serde(&subtree).map_err(|x| JsValue::from(x.to_string()))
+    }
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(untagged)]
+enum D3Atomic {
+    Parent { children: Vec<D3Node> },
+    Leaf { loc: f64 },
+}
+
+impl Save {
+    /// Just return country -> treasury, wealth by state (ID is  -> wealth by factory / pop (per province)
     pub fn forex_position(&self) -> HashMap<&str, (f64, HashMap<i32, (HashMap<&str, f64>, HashMap<&str, HashMap<String, f64>>)>)> {
         self.countries.iter().map(|(name, country)| {
             (name.as_str(), (country.money, country.states.values()
@@ -451,7 +559,8 @@ pub fn parse_save(savetext: &str) -> Result<Node, peg::error::ParseError<peg::st
 #[wasm_bindgen]
 pub fn process_save(savetext: &str) -> Result<Save, JsValue> {
     match parse_save(savetext) {
-        Ok(entry) => {
+        Ok(mut entry) => {
+            entry.raise();
             Save::new(entry).map_err(|x| JsValue::from(x.to_string()))
         },
         Err(E) => Err(JsValue::from(E.to_string())),

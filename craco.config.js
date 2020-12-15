@@ -30,7 +30,7 @@ module.exports = {
           webpackConfig.plugins.push(
             new WasmPackPlugin({
               crateDirectory: path.resolve(__dirname, "victoria-processing"),
-              //forceMode: 'production',
+              forceMode: 'production',
             })
           );
           return webpackConfig;
