@@ -40,7 +40,7 @@ function App() {
             const save = created.process_save(result)
             setProcessState(ProcessTypes.success)
             const forex = save.js_forex_position();
-            const chinese_states = forex.js_subtree_for_node(["CHI"], 1)
+            const chinese_states = forex.js_subtree_for_node([], 2)
             setWealthDistribution(chinese_states);
           }).catch(error => {
             console.error(error)

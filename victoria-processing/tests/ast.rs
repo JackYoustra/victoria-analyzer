@@ -1,5 +1,5 @@
 use wasm_bindgen_test::*;
-use victoria_processing::{Save, Node, parse_save};
+use victoria_processing::{Save, Node, parse_save, D3Atomic};
 use wasm_bindgen::JsValue;
 
 #[macro_use]
@@ -50,4 +50,16 @@ fn file_test() {
     let province = &provinces[&"\"Sitka\""];
     let pop = province["labourers"];
     assert_eq!(pop, 533502.6074);
+
+    let js_forex = save_result.js_forex_position();
+    assert_eq!(js_forex.children_value(), 21192826887.996773);
+    for subtree in &[1, 100000u32] {
+        let pruned = js_forex.cauterize(*subtree);
+        if let D3Atomic::Parent { children } = pruned.atom() {
+            console_log!("{:?}", children.iter().map(|x|  x.name()).collect::<Vec<&str>>());
+            assert_eq!(children.len(), 13)
+        } else {
+            unreachable!()
+        }
+    }
 }

@@ -211,31 +211,47 @@ pub struct D3Node {
 }
 
 impl D3Node {
+    // For tests
     pub fn parent(name: String, children: Vec<D3Node>) -> Self {
         D3Node { name, atom: D3Atomic::Parent{ children } }
     }
 
     pub fn leaf(name: String, atom: f64) -> Self {
-        D3Node { name, atom: D3Atomic::Leaf{ loc: atom } }
+        D3Node { name, atom: D3Atomic::Leaf{ size: atom } }
     }
 
-    fn children_value(&self) -> f64 {
+    pub fn atom(&self) -> &D3Atomic {
+        &self.atom
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    // Actually useful
+    pub fn children_value(&self) -> f64 {
         match &self.atom {
             D3Atomic::Parent { children } => children.iter().map(D3Node::children_value).sum(),
-            D3Atomic::Leaf { loc } => *loc,
+            D3Atomic::Leaf { size: loc } => *loc,
         }
     }
 
-    fn cauterize(&self, depth: u32) -> D3Node {
+    pub fn cauterize(&self, depth: u32) -> D3Node {
         if depth == 0 {
             D3Node::leaf(self.name.to_string(), self.children_value())
         } else {
             match &self.atom {
                 D3Atomic::Parent { children } => {
-                    D3Node::parent(self.name.to_string(),  children.iter().map(|x| x.cauterize(depth - 1)).collect())
+                    // https://github.com/plouc/nivo/issues/942
+                    // For now, remove anything < 1% of the total
+                    let stream = children.iter().map(|x| x.cauterize(depth - 1)).collect::<Vec<D3Node>>();
+                    let values = stream.iter().map(|x| x.children_value()).collect::<Vec<f64>>();
+                    let total: f64 = values.iter().sum();
+                    let kept = stream.iter().enumerate().filter(|(idx, _)| values[*idx] > (total * 0.01)).map(|(_, y)| y.clone()).collect();
+                    D3Node::parent(self.name.to_string(), kept)
                 }
                 // gdi I can't borrow anything 'cause of that one stupid int parse
-                D3Atomic::Leaf { loc } => D3Node::leaf(self.name.to_string(), *loc )
+                D3Atomic::Leaf { size: loc } => D3Node::leaf(self.name.to_string(), *loc )
             }
         }
     }
@@ -277,9 +293,9 @@ impl D3Node {
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(untagged)]
-enum D3Atomic {
+pub enum D3Atomic {
     Parent { children: Vec<D3Node> },
-    Leaf { loc: f64 },
+    Leaf { size: f64 },
 }
 
 impl Save {
