@@ -53,3 +53,10 @@ To learn React, check out the [React documentation](https://reactjs.org/).
 * Per-country wikipedia page?
 * Money breakdown - total money stock of the world, who owns what, etc
 * Current / potential RGO production breakdown
+
+Instructions to build
+* Download nvm, npm, rust, and wasm-pack
+* run wasm-pack build --release in victoria-processing
+* run npm i --legacy-peer-deps
+* run npm build
+* serve the website

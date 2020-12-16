@@ -254,7 +254,7 @@ impl D3Node {
                         keptTotal += values[idx];
                         y.clone()
                     }).collect();
-                    // kept.push(D3Node::leaf("Other".to_string(), keptTotal));
+                    // kept.push(D3Node::leaf(depth as u64 + 1 * keptTotal as u64, "Other".to_string(), keptTotal));
                     D3Node::parent(self.id, self.name.to_string(), kept)
                 }
                 // gdi I can't borrow anything 'cause of that one stupid int parse

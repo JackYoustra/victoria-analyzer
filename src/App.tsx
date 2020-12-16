@@ -26,6 +26,7 @@ const useStyles = makeStyles((theme: Theme) =>
 function App() {
   const [processState, setProcessState] = useState(ProcessTypes.initial);
   const [wealthDistribution, setWealthDistribution] = useState<D3Node | undefined>(undefined);
+  const [topLabel, setTopLabel] = useState<string>("Victoria econ viewer")
   const inputRef = useRef<HTMLInputElement | null>(null);
   const classes = useStyles();
 
@@ -38,10 +39,12 @@ function App() {
         const result = reader.result as string // has to be, because we read as text
         if (result) {
           rust.then(created => {
+            setTopLabel("Reading and processing " + file.name);
             const save = created.process_save(result)
             setProcessState(ProcessTypes.success)
             const forex = save.js_forex_position();
             setWealthDistribution(forex);
+            setTopLabel("Displaying " + file.name);
           }).catch(error => {
             console.error(error)
             setProcessState(ProcessTypes.failed)
@@ -70,7 +73,7 @@ function App() {
     <div className="App">
       <header className="App-header">
         <p>
-          Victoria econ viewer.
+          {topLabel}
         </p>
         <VictoriaSunburst data={wealthDistribution}/>
         <input id="myInput"

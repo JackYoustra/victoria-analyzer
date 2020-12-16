@@ -58,6 +58,7 @@ export default function VictoriaSunburst(props: SunburstProps) {
   }
   return (
     <div style={{ height: '600px', width: '500px' }}>
+      Money Chart - Where is all the money in the game?
       <Button
         variant="contained"
         color="primary"
